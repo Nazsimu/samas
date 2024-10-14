@@ -1,75 +1,76 @@
-# Define the path to your text file
+# Define the path to the file
 $filePath = "C:\path\to\your\file.txt"
 
-# Read the entire file content into an array of lines
-$fileContent = Get-Content -Path $filePath
+# Define the specific text you're searching for
+$searchText = "specific text"
+$smartNvmeText = "SMART_NVME"
 
-# Variables to store the extracted data
-$diskListSection = $false
-$smartNVMESection = $false
-$driveData = @()
-$smartNVMEData = @()
-$currentSmartData = @()
+# Initialize a flag to track when to start reading and a counter to count lines
+$reading = $false
+$diskCount = 0  # Counter for lines after the specific text
 
-# Loop through each line of the file
-foreach ($line in $fileContent) {
-    # Check if we've reached the "Disk List" section
-    if ($line -match "---- Disk List ----") {
-        $diskListSection = $true
-        continue
-    }
-    # Exit the "Disk List" section when we encounter another header or blank line
-    if ($diskListSection -and ($line -match "^----" -or $line -eq "")) {
-        $diskListSection = $false
-    }
-    
-    # Collect drive data under "Disk List"
-    if ($diskListSection) {
-        $driveData += $line
+# Initialize a list to store SMART_NVME lines
+$smartNvmeLines = @()
+
+# Use Get-Content to read the file line by line
+Get-Content -Path $filePath | ForEach-Object {
+    # Check if the line contains the specific text
+    if ($_ -match $searchText) {
+        # Set the flag to start reading and reset the counter
+        $reading = $true
+        $diskCount = 0  # Reset count after finding specific text
+        Write-Host "Found specific text: $_"
     }
 
-    # Check if we've reached the "SMART_NVME" section
-    if ($line -match "-- SMART_NVME --") {
-        $smartNVMESection = $true
-        continue
-    }
-
-    # Exit the "SMART_NVME" section when we reach another section or header
-    if ($smartNVMESection -and ($line -match "^----" -or $line -eq "")) {
-        $smartNVMESection = $false
-        # Add the collected data of the current drive to the full list if any
-        if ($currentSmartData.Count -gt 0) {
-            $smartNVMEData += [PSCustomObject]@{
-                Drive   = ($driveData[$driveData.Count - 1])  # Link the drive with this SMART_NVME data
-                Data    = $currentSmartData
+    # If the reading flag is set, process the lines
+    elseif ($reading) {
+        if ($_ -eq "") {
+            # Stop reading when an empty line is encountered
+            Write-Host "Stopping at empty line."
+            $reading = $false
+            
+            # Print the disk count before moving on to SMART_NVME lines
+            if ($diskCount -ne 0) {
+                Write-Host "Total disks read after specific text: $diskCount"
             }
-            # Clear for the next drive data
-            $currentSmartData = @()
+
+            # Continue reading the file to find SMART_NVME lines
+            return  # Skip to the next iteration to continue processing
+        } else {
+            # Increment the counter for each line found after specific text
+            $diskCount++
+            Write-Host "Reading line: $_"
+
+            # Check if the line contains SMART_NVME and store it
+            if ($_ -match $smartNvmeText) {
+                $smartNvmeLines += $_
+            }
+        }
+    }
+}
+
+# After hitting an empty line, continue reading for SMART_NVME lines
+if ($diskCount -ne 0) {
+    Write-Host "Continuing to find SMART_NVME lines..."
+
+    # Re-read the file from the beginning to find SMART_NVME lines
+    Get-Content -Path $filePath | ForEach-Object {
+        if ($_ -match $smartNvmeText) {
+            $smartNvmeLines += $_
         }
     }
 
-    # Collect hex data under "-- SMART_NVME --" (range from 000 to 1F0)
-    if ($smartNVMESection -and ($line -match "^[0-9A-F]{3}\s")) {
-        $currentSmartData += $line
+    # Print SMART_NVME lines based on disk count
+    if ($diskCount -eq 1) {
+        if ($smartNvmeLines.Count -eq 1) {
+            Write-Host "SMART_NVME line for one disk: $($smartNvmeLines[0])"
+        } else {
+            Write-Host "No SMART_NVME line found for one disk."
+        }
+    } elseif ($diskCount -gt 1) {
+        Write-Host "SMART_NVME lines for $diskCount disks:"
+        $smartNvmeLines | ForEach-Object {
+            Write-Host $_
+        }
     }
-}
-
-# Output the number of drives and the drive data
-if ($driveData.Count -gt 0) {
-    Write-Host "Number of connected drives: $($driveData.Count)"
-    Write-Host "Drive data:"
-    $driveData | ForEach-Object { Write-Host $_ }
-} else {
-    Write-Host "No drives found under Disk List."
-}
-
-# Output SMART_NVME data for each drive
-if ($smartNVMEData.Count -gt 0) {
-    foreach ($smart in $smartNVMEData) {
-        Write-Host "`nDrive:" $smart.Drive
-        Write-Host "SMART_NVME data:"
-        $smart.Data | ForEach-Object { Write-Host $_ }
-    }
-} else {
-    Write-Host "No SMART_NVME data found."
 }
